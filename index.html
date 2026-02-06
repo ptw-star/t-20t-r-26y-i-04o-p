@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tokyo 2026</title>
+    <!-- 引入外部資源 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="style.css">
+    
+    <script>
+        tailwind.config = { 
+            theme: { 
+                extend: { 
+                    colors: { 
+                        primary: '#91A0A5', secondary: '#B77F70', accent: '#A79A89', sage: '#8E9775', bg: '#F4F1EE' 
+                    } 
+                } 
+            } 
+        }
+    </script>
+</head>
+<body class="max-w-md mx-auto shadow-2xl min-h-screen bg-bg">
+
+<div id="app" class="pb-24 min-h-screen">
+    <!-- 全螢幕同步鎖定遮罩 (新增功能：上傳時顯示) -->
+    <transition name="modal">
+        <div v-if="isSyncing" class="fixed inset-0 z-[100] bg-white/60 backdrop-blur-[2px] flex flex-col items-center justify-center space-y-4">
+            <div class="w-12 h-12 border-4 border-secondary border-t-transparent rounded-full animate-spin"></div>
+            <div class="flex flex-col items-center">
+                <span class="text-secondary font-black tracking-widest text-lg">資料同步中</span>
+                <span class="text-gray-400 text-xs mt-1 italic">請稍候...</span>
+            </div>
+        </div>
+    </transition>
+
+    <!-- Header -->
+    <header class="pt-5 pb-2 px-6 bg-white sticky top-0 z-40 shadow-sm">
+        <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-2">
+                <h1 class="text-xl font-bold text-gray-600">{{ activeTabTitle }}</h1>
+                <!-- 天氣圖標 -->
+                <button v-if="currentTab === 'schedule'" @click="openWeather" class="text-primary p-1 transition-transform active:scale-90">
+                    <i data-lucide="cloud-sun" class="w-6 h-6"></i>
+                </button>
+                <!-- 計算機圖標 -->
+                <button v-if="currentTab === 'expense'" @click="showCalcModal = true" class="text-primary p-1 transition-transform active:scale-90">
+                    <i data-lucide="calculator" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <div class="flex gap-2">
+                <button v-if="currentTab === 'schedule'" @click="toggleAddSchedule" class="text-secondary p-2"><i data-lucide="plus-circle" class="w-6 h-6"></i></button>
+                <button v-if="currentTab === 'shopping'" @click="toggleAddShop" class="text-secondary p-2"><i data-lucide="plus-circle" class="w-6 h-6"></i></button>
+                <button v-if="currentTab === 'expense'" @click="toggleAddExpense" class="text-secondary p-2"><i data-lucide="plus-circle" class="w-6 h-6"></i></button>
+                <button @click="showSettings = true" class="text-primary p-2"><i data-lucide="settings" class="w-6 h-6"></i></button>
+            </div>
+        </div>
+
+        <div v-if="currentTab === 'schedule' || currentTab === 'expense'" class="flex overflow-x-auto no-scrollbar gap-3 py-2">
+            <button v-if="currentTab === 'expense'" @click="scrollToDate('summary')" :class="selectedDate === 'summary' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-400'" class="flex-shrink-0 px-5 py-2 rounded-full text-sm font-medium transition-all">總結</button>
+            <button v-for="date in dateRange" @click="scrollToDate(date)" :class="selectedDate === date ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'" class="flex-shrink-0 px-5 py-2 rounded-full text-sm font-medium transition-all">{{ date }}</button>
+        </div>
+
+        <div v-if="currentTab === 'shopping'" class="flex overflow-x-auto no-scrollbar gap-3 py-2">
+            <button @click="shopFilter = 'all'" :class="shopFilter === 'all' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'" class="flex-shrink-0 px-5 py-2 rounded-full text-sm font-medium transition-all">全部</button>
+            <button v-for="cat in shopCategories" @click="shopFilter = cat" :class="shopFilter === cat ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'" class="flex-shrink-0 px-5 py-2 rounded-full text-sm font-medium transition-all">{{ cat }}</button>
+        </div>
+    </header>
+
+    <main class="p-4">
+        <!-- 1. 行程表 -->
+        <section v-if="currentTab === 'schedule'" class="space-y-8">
+            <div v-if="showAddSchedule" id="add-schedule-form" class="bg-white p-5 rounded-3xl shadow-md space-y-4 border-2 border-secondary/20 transition-all scroll-mt-24">
+                <div class="grid grid-cols-2 gap-2">
+                    <select v-model="newScheduleItem.date" class="input-field"><option v-for="date in dateRange" :value="date">{{ date }}</option></select>
+                    <input v-model="newScheduleItem.time" type="time" class="input-field">
+                </div>
+                <div class="flex gap-2 overflow-x-auto no-scrollbar py-1">
+                    <button v-for="cat in ['交通', '景點', '飲食', '購物']" 
+                        @click="newScheduleItem.category = (newScheduleItem.category === cat ? '' : cat)" 
+                        :class="newScheduleItem.category === cat ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'"
+                        class="px-5 py-2 rounded-full text-xs font-bold transition-all flex-shrink-0">
+                        {{ cat }}
+                    </button>
+                </div>
+                <input v-model="newScheduleItem.title" placeholder="行程標題" class="input-field font-bold w-full">
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="relative"><span class="absolute left-3 top-1 text-[8px] text-gray-400 uppercase font-bold">預計每人</span><input v-model.number="newScheduleItem.estPersonal" type="number" placeholder="¥" class="input-field pt-5"></div>
+                    <div class="relative"><span class="absolute left-3 top-1 text-[8px] text-gray-400 uppercase font-bold">預計合共</span><input v-model.number="newScheduleItem.estShared" type="number" placeholder="¥" class="input-field pt-5"></div>
+                </div>
+                <input v-model="newScheduleItem.address" placeholder="地址" class="input-field w-full">
+                <textarea v-model="newScheduleItem.desc" placeholder="備註" class="input-field h-20 w-full"></textarea>
+                <button @click="addScheduleItem" class="w-full bg-secondary text-white py-3 rounded-xl font-bold shadow-sm">{{ editingScheduleId ? '更新行程' : '新增行程' }}</button>
+                <button v-if="editingScheduleId" @click="cancelEditSchedule" class="w-full text-xs text-gray-400 py-1">取消</button>
+            </div>
+
+            <div v-for="date in dateRange" :key="date" :id="'date-' + date.replace('/', '-')" class="pt-2 scroll-mt-28">
+                <div class="flex items-center mb-4">
+                    <div class="bg-accent text-white px-4 py-1 rounded-full text-xs font-bold">{{ date }}</div>
+                    <div class="flex-1 h-[1px] bg-gray-200 ml-3"></div>
+                </div>
+                <div v-if="getScheduleByDate(date).length === 0" class="text-center py-4 text-gray-300 text-xs italic">暫無行程</div>
+                <div v-for="(item, index) in getScheduleByDate(date)" :key="item.id || index" class="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-primary mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm text-primary font-bold">{{ item.time }}</span>
+                            <span v-if="item.category" :class="getCatStyle(item.category)" class="text-[0.7rem] px-2 py-0.5 rounded-md font-bold text-white">{{ item.category }}</span>
+                            <div v-if="item.estPersonal || item.estShared" class="flex gap-2 items-center">
+                                <span v-if="item.estPersonal" class="text-[11px] text-gray-400 font-bold">每人 ¥{{ item.estPersonal }}</span>
+                                <span v-if="item.estShared" class="text-[11px] text-gray-400 font-bold">合共 ¥{{ item.estShared }}</span>
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button @click="editScheduleItem(item, date, index)" class="text-gray-300 p-1"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+                            <button @click="deleteScheduleItem(date, index)" class="text-red-200 p-1"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-start gap-3">
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-gray-700 font-bold leading-tight">{{ item.title }}</h3>
+                            <p v-if="item.address" class="text-xs text-primary/60 mt-1 flex items-center gap-1"><i data-lucide="map-pin" class="w-3 h-3"></i>{{ item.address }}</p>
+                            <p v-if="item.desc" class="text-xs text-gray-400 mt-2 whitespace-pre-wrap">{{ item.desc }}</p>
+                        </div>
+                        <button @click="jumpToMap(item.address || item.title)" class="bg-primary/10 p-2.5 rounded-xl text-primary flex-shrink-0"><i data-lucide="map" class="w-5 h-5"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-10 p-5 bg-white rounded-3xl border border-dashed border-gray-300 space-y-3 shadow-sm">
+                <h4 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">預計支出</h4>
+                <div class="flex justify-between items-center"><span class="text-sm text-gray-600">交通</span><span class="text-base font-black text-primary">¥ {{ Math.round(totalEstTransportPersonal) }}</span></div>
+                <div class="flex justify-between items-center"><span class="text-sm text-gray-600">飲食</span><span class="text-base font-black text-secondary">¥ {{ Math.round(totalEstDiningPersonal) }}</span></div>
+                <div class="flex justify-between items-center"><span class="text-sm text-gray-600">景點</span><span class="text-base font-black text-sage">¥ {{ Math.round(totalEstAttractionsPersonal) }}</span></div>
+                <div class="h-[1px] bg-gray-100"></div>
+                <div class="flex justify-between items-center pt-1"><span class="text-sm font-bold text-gray-700">每人合共</span><span class="text-lg font-black text-gray-700">¥ {{ Math.round(totalEstTransportPersonal + totalEstDiningPersonal + totalEstAttractionsPersonal) }}</span></div>
+            </div>
+        </section>
+
+        <!-- 2. 地圖頁 -->
+        <section v-if="currentTab === 'map'" class="space-y-4">
+            <div class="bg-white p-2 rounded-3xl shadow-sm"><div class="map-wrapper"><iframe width="100%" height="100%" frameborder="0" :src="mapSrc"></iframe></div></div>
+            <button @click="openMyMap" class="w-full p-4 bg-white border border-sage/20 text-gray-700 rounded-2xl flex items-center justify-center gap-2 shadow-sm font-bold active:scale-95"><i data-lucide="map-pin" class="w-5 h-5 text-sage"></i> 我的地圖</button>
+            <div class="grid grid-cols-2 gap-3">
+                <button @click="searchMap('餐廳')" class="p-4 bg-white rounded-2xl flex flex-col items-center gap-2 shadow-sm active:bg-gray-50"><i data-lucide="utensils" class="text-primary"></i><span class="font-bold text-sm">搵餐廳</span></button>
+                <button @click="searchMap('景點')" class="p-4 bg-white rounded-2xl flex flex-col items-center gap-2 shadow-sm active:bg-gray-50"><i data-lucide="camera" class="text-secondary"></i><span class="font-bold text-sm">睇景點</span></button>
+            </div>
+        </section>
+
+        <!-- 3. 購物清單 -->
+        <section v-if="currentTab === 'shopping'" class="space-y-4">
+            <div v-if="showAddShopItem" id="add-shopping-form" class="bg-white p-5 rounded-3xl shadow-md space-y-3 border-2 border-secondary/20 transition-all scroll-mt-24">
+                <div class="flex gap-3">
+                    <div class="relative w-16 h-16 bg-gray-100 rounded-xl overflow-hidden flex items-center justify-center border-2 border-dashed border-gray-200">
+                        <img v-if="newShopItem.image" :src="newShopItem.image" class="w-full h-full object-cover">
+                        <i v-else data-lucide="image" class="text-gray-300"></i>
+                        <input type="file" @change="handleImageUpload" accept="image/*" class="absolute inset-0 opacity-0 cursor-pointer">
+                    </div>
+                    <div class="flex-1 space-y-2">
+                        <input v-model="newShopItem.name" placeholder="想買什麼？" class="input-field">
+                        <div class="grid grid-cols-2 gap-2"><input v-model="newShopItem.store" placeholder="店鋪" class="input-field">
+                            <select v-model="newShopItem.category" class="input-field"><option v-for="cat in shopCategories" :value="cat">{{ cat }}</option></select>
+                        </div>
+                    </div>
+                </div>
+                <button @click="addShopItem" class="w-full bg-secondary text-white py-3 rounded-xl font-bold">{{ editingShopId ? '更新清單' : '新增清單' }}</button>
+                <button v-if="editingShopId" @click="cancelEditShop" class="w-full text-xs text-gray-400 py-1">取消</button>
+            </div>
+            <div v-for="item in sortedShoppingList" :key="item.id" class="bg-white p-3 rounded-2xl flex items-center gap-3 shadow-sm transition-all" :class="item.done ? 'opacity-60' : ''">
+                <input type="checkbox" v-model="item.done" @change="saveToGitHubAuto" class="w-5 h-5 accent-primary rounded-full">
+                <img v-if="item.image" :src="item.image" @click="previewImage(item.image)" class="w-14 h-14 rounded-xl object-cover cursor-pointer hover:opacity-80 transition-opacity">
+                <div class="flex-1 min-w-0">
+                    <div :class="item.done ? 'line-through text-gray-300' : 'text-gray-700'" class="font-bold truncate">{{ item.name }}</div>
+                    <div class="flex items-center gap-2 mt-0.5"><span class="text-[0.6rem] bg-gray-100 px-2 py-0.5 rounded text-gray-500">{{ item.category }}</span><span class="text-[0.6rem] text-gray-400 truncate">{{ item.store }}</span></div>
+                </div>
+                <div class="flex gap-1">
+                    <button @click="editShopItem(item)" class="text-gray-300 p-2"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                    <button @click="deleteShopItem(item.id)" class="text-red-200 p-2"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. 支出頁 -->
+        <section v-if="currentTab === 'expense'" class="space-y-6">
+            <div v-if="showAddExpense" id="add-expense-form" class="bg-white p-5 rounded-3xl shadow-md space-y-4 border-2 border-secondary/20 transition-all scroll-mt-24">
+                <div class="flex gap-2">
+                    <button @click="newExpense.type = 'expense'" :class="newExpense.type==='expense'?'bg-primary text-white shadow-sm':'bg-gray-100 text-gray-400'" class="flex-1 py-2 rounded-lg text-xs font-bold transition-all">支出</button>
+                    <button @click="newExpense.type = 'income'" :class="newExpense.type==='income'?'bg-primary text-white shadow-sm':'bg-gray-100 text-gray-400'" class="flex-1 py-2 rounded-lg text-xs font-bold transition-all">收入</button>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <select v-model="newExpense.date" class="input-field text-xs"><option v-for="date in dateRange" :value="date">{{ date }}</option></select>
+                    <select v-model="newExpense.person" class="input-field text-xs"><option v-for="p in ['公數', '爸媽', '妃', '而']" :value="p">{{ p }}</option></select>
+                </div>
+                <div class="flex gap-2 overflow-x-auto no-scrollbar py-1">
+                    <button v-for="p in ['公數', '爸媽', '妃', '而']" @click="newExpense.person = p" :class="newExpense.person === p ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'" class="px-5 py-2 rounded-full text-xs font-bold transition-all flex-shrink-0">{{ p }}</button>
+                </div>
+                <input v-model="newExpense.title" placeholder="標題" class="input-field w-full">
+                
+                <div class="relative">
+                    <input v-model.number="newExpense.amount" type="number" placeholder="金額 ¥" class="input-field font-bold text-gray-700 w-full">
+                    <div v-if="newExpense.amount > 0" class="mt-1 px-1 flex flex-wrap gap-x-3 gap-y-1">
+                        <span class="text-[10px] text-gray-400">折合 HKD:</span>
+                        <span class="text-[10px] text-accent font-bold">爸媽 ${{(newExpense.amount * exchangeRates.baMa).toFixed(1)}}</span>
+                        <span class="text-[10px] text-sage font-bold">妃 ${{(newExpense.amount * exchangeRates.fei).toFixed(1)}}</span>
+                        <span class="text-[10px] text-secondary font-bold">而 ${{(newExpense.amount * exchangeRates.yi).toFixed(1)}}</span>
+                    </div>
+                </div>
+
+                <button @click="addExpense" class="w-full bg-secondary text-white py-3 rounded-xl font-bold active:scale-95 shadow-md">{{ editingExpenseId ? '更新支出' : '新增支出' }}</button>
+                <button v-if="editingExpenseId" @click="cancelEditExpense" class="w-full text-xs text-gray-400 py-1">取消</button>
+            </div>
+
+            <!-- 個人大總結 -->
+            <div id="expense-summary" class="scroll-mt-32 space-y-3 mb-8">
+                <div v-for="p in peopleConfigs" :key="p.name" :class="p.colorClass" class="p-4 rounded-[2rem] shadow-sm border border-white/50 relative">
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="text-sm font-black text-gray-700 bg-white/60 px-4 py-1 rounded-full shadow-sm">{{ p.name }}</span>
+                        <div class="flex gap-6 items-center">
+                            <div class="text-right"><span class="text-[9px] font-bold text-gray-400 block tracking-tight uppercase">總支出</span><span class="text-base font-black text-secondary leading-none">¥{{ getPersonStats(p.name).totalSpent }}</span></div>
+                            <div class="text-right border-l border-gray-200 pl-4"><span class="text-[9px] font-bold text-gray-400 block tracking-tight uppercase">現金結餘</span><span class="text-base font-black text-gray-700 leading-none">¥{{ getPersonStats(p.name).cashBalance }}</span></div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 relative z-10">
+                        <div class="bg-white/40 rounded-xl p-2.5 flex flex-col items-center"><span class="text-[10px] font-bold text-gray-500 mb-0.5">現金支出</span><span class="text-sm font-bold text-gray-700">¥{{ getPersonStats(p.name).cashSpent }}</span></div>
+                        <div class="bg-white/20 rounded-xl p-2.5 flex flex-col items-center border border-white/30"><span class="text-[10px] font-bold text-gray-500 mb-0.5">信用卡</span><span class="text-sm font-bold text-gray-700">¥{{ getPersonStats(p.name).creditSpent }}</span></div>
+                        <div class="bg-white/20 rounded-xl p-2.5 flex flex-col items-center border border-white/30"><span class="text-[10px] font-bold text-gray-500 mb-0.5">扣賬卡</span><span class="text-sm font-bold text-gray-700">¥{{ getPersonStats(p.name).debitSpent }}</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-8 pt-2">
+                <div v-for="day in dateRange" :key="day" :id="'expense-date-' + day.replace('/', '-')" class="scroll-mt-48">
+                    <div class="flex justify-between items-center px-2 mb-4">
+                        <span class="text-xs font-bold text-gray-400">{{ day }}</span>
+                        <div class="h-[1px] flex-1 bg-gray-200 mx-4"></div>
+                        <span class="text-[10px] text-primary font-bold">小計 ¥{{ getDayTotal(day) }}</span>
+                    </div>
+
+                    <div v-for="item in getExpensesByDate(day)" :key="item.id" class="bg-white p-3 rounded-2xl shadow-sm flex items-center gap-3 mb-3">
+                        <div :style="{ backgroundColor: getPersonColor(item.person) }" class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white text-[10px] font-bold">{{ item.person.charAt(0) }}</div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-bold text-gray-700 truncate">{{ item.title }}</div>
+                            <div class="text-[10px] text-gray-400 font-medium">{{ item.method }}</div>
+                        </div>
+                        <div class="text-right">
+                            <div :class="item.type === 'income' ? 'text-primary' : 'text-gray-600'" class="font-bold text-sm">{{ item.type === 'income' ? '+' : '-' }}{{ item.amount }}</div>
+                            <div class="flex gap-1 justify-end">
+                                <button @click="editExpense(item)" class="text-gray-300 p-1"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+                                <button @click="deleteExpense(item.id)" class="text-red-200 p-1"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 px-1 mt-6">
+                        <div v-for="pName in ['公數', '爸媽', '妃', '而']" :key="pName" :class="getPersonBg(pName)" class="rounded-2xl p-3 flex flex-col shadow-sm">
+                            <span class="font-bold text-gray-700 mb-1 border-b border-black/5 pb-1 text-xs">{{ pName }}</span>
+                            <div class="space-y-0.5">
+                                <div v-if="getPersonDayMethod(day, pName, '現金') > 0" class="flex justify-between gap-2 text-[9px] text-gray-500"><span>現金</span><span>¥{{ getPersonDayMethod(day, pName, '現金') }}</span></div>
+                                <div v-if="getPersonDayMethod(day, pName, '信用卡') > 0" class="flex justify-between gap-2 text-[9px] text-gray-500"><span>信用卡</span><span>¥{{ getPersonDayMethod(day, pName, '信用卡') }}</span></div>
+                                <div v-if="getPersonDayMethod(day, pName, '扣賬卡') > 0" class="flex justify-between gap-2 text-[9px] text-gray-500"><span>扣賬卡</span><span>¥{{ getPersonDayMethod(day, pName, '扣賬卡') }}</span></div>
+                                <div v-if="getDayPersonTotal(day, pName) === 0" class="text-[9px] text-gray-300 italic">無支出</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 天氣預報彈窗 -->
+    <transition name="modal">
+        <div v-if="showWeatherModal" class="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+            <div class="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-6 space-y-4 relative">
+                <div class="flex justify-between items-center border-b border-gray-50 pb-2">
+                    <h2 class="font-bold text-gray-700">東京天氣預報</h2>
+                    <button @click="showWeatherModal = false" class="text-gray-400 p-2"><i data-lucide="x"></i></button>
+                </div>
+                <div v-if="loadingWeather" class="py-12 flex flex-col items-center gap-3">
+                    <div class="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <span class="text-xs text-gray-400 italic">下載資料中...</span>
+                </div>
+                <div v-else class="grid grid-cols-1 gap-2">
+                    <div v-for="w in weatherData" :key="w.date" class="flex items-center justify-between bg-gray-50 p-4 rounded-2xl border border-gray-100/50">
+                        <span class="text-sm font-bold text-gray-500">{{ w.date }}</span>
+                        <span class="text-2xl">{{ w.icon }}</span>
+                        <div class="text-right">
+                            <span class="text-sm font-black text">{{ w.tempMax }}°</span>
+                            <span class="text-xs text-gray-600 ml-1">/ {{ w.tempMin }}°</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <!-- 匯率計算機 -->
+    <transition name="modal">
+        <div v-if="showCalcModal" class="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div class="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-6 space-y-4 relative">
+                <div class="flex justify-between items-center border-b border-gray-50 pb-2">
+                    <h2 class="font-bold text-gray-700 text-lg flex items-center gap-2">
+                        <i data-lucide="calculator" class="w-5 h-5 text-primary"></i> 匯率計算機
+                    </h2>
+                    <button @click="showCalcModal = false" class="text-gray-400 p-2 active:scale-90"><i data-lucide="x"></i></button>
+                </div>
+
+                <!-- 計算機顯示螢幕 -->
+                <div class="bg-gray-50 p-4 rounded-3xl border border-gray-100 text-right space-y-1">
+                    <div class="text-xs text-gray-400 font-mono h-4 overflow-hidden">{{ calcExpression || '0' }}</div>
+                    <div class="text-3xl font-black text-primary truncate">¥ {{ calcJpy }}</div>
+                </div>
+
+                <!-- 港幣實時換算結果 -->
+                <div class="grid grid-cols-3 gap-2">
+                    <div class="bg-[#ECE9E4]/60 p-2 rounded-2xl border border-white text-center">
+                        <div class="text-[9px] font-bold text-gray-400 uppercase">爸媽</div>
+                        <div class="text-sm font-black text-gray-700">${{(calcJpy * exchangeRates.baMa).toFixed(1)}}</div>
+                    </div>
+                    <div class="bg-[#E9EBE2]/60 p-2 rounded-2xl border border-white text-center">
+                        <div class="text-[9px] font-bold text-gray-400 uppercase">妃</div>
+                        <div class="text-sm font-black text-gray-700">${{(calcJpy * exchangeRates.fei).toFixed(1)}}</div>
+                    </div>
+                    <div class="bg-[#EFE2DE]/60 p-2 rounded-2xl border border-white text-center">
+                        <div class="text-[9px] font-bold text-gray-400 uppercase">而</div>
+                        <div class="text-sm font-black text-gray-700">${{(calcJpy * exchangeRates.yi).toFixed(1)}}</div>
+                    </div>
+                </div>
+
+                <!-- 計算機按鍵區 -->
+                <div class="grid grid-cols-4 gap-2">
+                    <button @click="calcClear" class="bg-red-50 text-red-400 font-bold p-4 rounded-2xl active:scale-95 transition-transform">C</button>
+                    <button @click="calcAppend('/')" class="bg-gray-100 text-primary font-bold p-4 rounded-2xl active:scale-95 transition-transform">÷</button>
+                    <button @click="calcAppend('*')" class="bg-gray-100 text-primary font-bold p-4 rounded-2xl active:scale-95 transition-transform">×</button>
+                    <button @click="calcBackspace" class="bg-gray-100 text-gray-400 p-4 rounded-2xl active:scale-95 transition-transform flex items-center justify-center">
+                        <i data-lucide="delete" class="w-5 h-5"></i>
+                    </button>
+                    
+                    <button @click="calcAppend('7')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">7</button>
+                    <button @click="calcAppend('8')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">8</button>
+                    <button @click="calcAppend('9')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">9</button>
+                    <button @click="calcAppend('-')" class="bg-gray-100 text-primary font-bold p-4 rounded-2xl active:scale-95">-</button>
+
+                    <button @click="calcAppend('4')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">4</button>
+                    <button @click="calcAppend('5')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">5</button>
+                    <button @click="calcAppend('6')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">6</button>
+                    <button @click="calcAppend('+')" class="bg-gray-100 text-primary font-bold p-4 rounded-2xl active:scale-95">+</button>
+
+                    <button @click="calcAppend('1')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">1</button>
+                    <button @click="calcAppend('2')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">2</button>
+                    <button @click="calcAppend('3')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">3</button>
+                    <button @click="calcResult" class="bg-primary text-white font-bold p-4 rounded-2xl row-span-2 active:scale-95">=</button>
+
+                    <button @click="calcAppend('0')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl col-span-2 active:scale-95">0</button>
+                    <button @click="calcAppend('.')" class="bg-gray-50 text-gray-600 font-bold p-4 rounded-2xl active:scale-95">.</button>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <!-- 圖片預覽彈窗 -->
+    <transition name="modal">
+        <div v-if="showImageModal" class="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" @click.self="showImageModal = false">
+            <div class="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-4 relative overflow-hidden">
+                <div class="flex justify-between items-center mb-2 px-2 border-b border-gray-50 pb-2">
+                    <button @click="showImageModal = false" class="text-gray-400 p-2 ml-auto"><i data-lucide="x"></i></button>
+                </div>
+                <div class="rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center">
+                    <img :src="selectedImageUrl" class="w-full h-auto max-h-[70vh] object-contain">
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <!-- Settings Modal -->
+    <transition name="modal">
+        <div v-if="showSettings" class="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+            <div class="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-6 space-y-4 relative">
+                <div class="flex justify-between items-center">
+                    <h2 class="font-bold text-gray-700">GitHub 設定</h2>
+                    <button @click="showSettings = false" class="text-gray-400 p-2"><i data-lucide="x"></i></button>
+                </div>
+                <input v-model="githubConfig.owner" placeholder="GitHub A/C" class="input-field">
+                <input v-model="githubConfig.repo" placeholder="Repository" class="input-field">
+                <input v-model="githubConfig.token" type="password" placeholder="Token" class="input-field">
+                
+                <div class="pt-2 space-y-2 border-t border-gray-100">
+                    <span class="text-[10px] text-gray-400 font-bold uppercase ml-1">個人匯率設定 (1 JPY = ? HKD)</span>
+                    <div class="grid grid-cols-3 gap-2">
+                        <div><span class="text-[8px] text-gray-400 block ml-1">爸媽</span><input v-model.number="exchangeRates.baMa" type="number" step="0.0001" class="input-field py-2 text-xs"></div>
+                        <div><span class="text-[8px] text-gray-400 block ml-1">妃</span><input v-model.number="exchangeRates.fei" type="number" step="0.0001" class="input-field py-2 text-xs"></div>
+                        <div><span class="text-[8px] text-gray-400 block ml-1">而</span><input v-model.number="exchangeRates.yi" type="number" step="0.0001" class="input-field py-2 text-xs"></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 pt-2">
+                    <button @click="fetchFromGitHub" class="bg-gray-100 py-3 rounded-xl font-bold text-sm">下載資料</button>
+                    <button @click="syncToGitHub()" class="bg-secondary text-white py-3 rounded-xl font-bold text-sm">上傳資料</button>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/90 backdrop-blur-md border-t flex justify-around p-3 z-30">
+        <button v-for="tab in tabs" @click="currentTab = tab.id" :class="currentTab === tab.id ? 'text-secondary' : 'text-gray-300'" class="flex flex-col items-center transition-colors">
+            <i :data-lucide="tab.icon" class="w-6 h-6"></i><span class="text-[10px] mt-1 font-bold">{{ tab.name }}</span>
+        </button>
+    </nav>
+</div>
+
+<!-- 引入外部邏輯檔案 -->
+<script src="app.js"></script>
+
+</body>
+</html>
