@@ -8,6 +8,7 @@ setup() {
     const showAddShopItem = ref(false);
     const showAddExpense = ref(false);
     
+    // 彈窗與同步狀態
     const showWeatherModal = ref(false);
     const showCalcModal = ref(false);
     const showImageModal = ref(false); 
@@ -16,15 +17,14 @@ setup() {
     const calcExpression = ref(''); 
     const calcJpy = ref(0);
     const selectedImageUrl = ref('');
-
     const isSyncing = ref(false);
     const initialLoadedCount = ref(0);
 
     const selectedDate = ref(null);
     const mapQuery = ref('東京');
-    const mapMode = ref('normal');
-    
-    // 更新後的「我的地圖」連結
+    const mapMode = ref('normal'); // 'normal' 是 Google 搜尋, 'mymap' 是你的地圖
+
+    // --- 關鍵修改：更新為你提供的 Embed URL ---
     const myMapUrl = 'https://www.google.com/maps/d/embed?mid=1BH1Wp-fTNOady5xFfHqKO5MSHP2hNOM&ehbc=2E312F&noprof=1';
     
     const dateRange = ['29/3', '30/3', '31/3', '1/4', '2/4', '3/4', '4/4', '5/4', '6/4', '7/4'];
@@ -54,20 +54,13 @@ setup() {
 
     const checkPassword = () => {
         const pw = prompt("請輸入操作密碼");
-        if (pw === "1234") return true; 
-        alert("密碼錯誤。");
-        return false;
+        return pw === "1234";
     };
 
     const previewImage = (url) => {
         selectedImageUrl.value = url;
         showImageModal.value = true;
         nextTick(lucide.createIcons);
-    };
-
-    const getTotalItemCount = () => {
-        const scheduleCount = Object.values(scheduleData.value).flat().length;
-        return scheduleCount + shoppingList.value.length + expenseList.value.length;
     };
 
     // --- 計算機邏輯 ---
@@ -90,13 +83,6 @@ setup() {
     };
 
     // --- 天氣預報 ---
-    const getWeatherIcon = (code) => {
-        if (code === 0) return '☀️';
-        if (code <= 3) return '🌤️';
-        if (code <= 48) return '☁️';
-        if (code <= 67) return '🌧️';
-        return '🌡️';
-    };
     const openWeather = async () => {
         showWeatherModal.value = true;
         nextTick(lucide.createIcons);
@@ -109,7 +95,12 @@ setup() {
                 date: t.split('-').slice(1).join('/'),
                 tempMax: Math.round(data.daily.temperature_2m_max[i]),
                 tempMin: Math.round(data.daily.temperature_2m_min[i]),
-                icon: getWeatherIcon(data.daily.weather_code[i])
+                icon: (code) => {
+                    if (code === 0) return '☀️';
+                    if (code <= 3) return '🌤️';
+                    if (code <= 48) return '☁️';
+                    return '🌧️';
+                }(data.daily.weather_code[i])
             })).slice(0, 5);
         } catch (e) { console.error(e); }
         loadingWeather.value = false;
@@ -117,103 +108,66 @@ setup() {
 
     // --- GitHub 同步 ---
     const syncToGitHub = async (isAuto = false) => {
-        const currentCount = getTotalItemCount();
+        const currentCount = (Object.values(scheduleData.value).flat().length) + shoppingList.value.length + expenseList.value.length;
         if (isAuto && initialLoadedCount.value > 0 && initialLoadedCount.value - currentCount >= 5) return;
-        if (!githubConfig.value.token || !githubConfig.value.owner || !githubConfig.value.repo) return;
+        if (!githubConfig.value.token) return;
         isSyncing.value = true;
         const url = `https://api.github.com/repos/${githubConfig.value.owner}/${githubConfig.value.repo}/contents/data.json`;
         try {
-            const getRes = await fetch(url, { headers: { Authorization: `token ${githubConfig.value.token}` }, cache: 'no-store' });
-            let sha = getRes.ok ? (await getRes.json()).sha : '';
+            const res = await fetch(url, { headers: { Authorization: `token ${githubConfig.value.token}` }, cache: 'no-store' });
+            let sha = res.ok ? (await res.json()).sha : '';
             const content = btoa(unescape(encodeURIComponent(JSON.stringify({ schedule: scheduleData.value, shopping: shoppingList.value, expenses: expenseList.value, rates: exchangeRates.value }))));
-            const putRes = await fetch(url, { method: 'PUT', headers: { Authorization: `token ${githubConfig.value.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: 'sync', content, sha: sha || undefined }) });
-            if (putRes.ok && !isAuto) alert('🚀 同步成功！');
+            await fetch(url, { method: 'PUT', headers: { Authorization: `token ${githubConfig.value.token}` }, body: JSON.stringify({ message: 'sync', content, sha: sha || undefined }) });
         } catch (e) { console.error(e); } finally { isSyncing.value = false; }
     };
 
     const fetchFromGitHub = async () => {
         if (!githubConfig.value.token) return;
         isSyncing.value = true;
-        const url = `https://api.github.com/repos/${githubConfig.value.owner}/${githubConfig.value.repo}/contents/data.json`;
         try {
-            const res = await fetch(url, { headers: { Authorization: `token ${githubConfig.value.token}` }, cache: 'no-store' });
+            const res = await fetch(`https://api.github.com/repos/${githubConfig.value.owner}/${githubConfig.value.repo}/contents/data.json`, { headers: { Authorization: `token ${githubConfig.value.token}` }, cache: 'no-store' });
             if (res.ok) {
-                const file = await res.json();
-                const data = JSON.parse(decodeURIComponent(escape(atob(file.content))));
-                scheduleData.value = data.schedule || {}; 
-                shoppingList.value = data.shopping || []; 
-                expenseList.value = data.expenses || [];
+                const data = JSON.parse(decodeURIComponent(escape(atob((await res.json()).content))));
+                scheduleData.value = data.schedule || {}; shoppingList.value = data.shopping || []; expenseList.value = data.expenses || [];
                 if (data.rates) exchangeRates.value = data.rates;
-                nextTick(() => { initialLoadedCount.value = getTotalItemCount(); });
             }
-        } catch (e) { console.error(e); }
-        isSyncing.value = false;
+        } catch (e) { console.error(e); } finally { isSyncing.value = false; }
     };
 
+    // --- 輔助功能 ---
     const saveToGitHubAuto = () => syncToGitHub(true);
-
-    // --- 各項操作 (Schedule, Shopping, Expense) ---
-    const addScheduleItem = () => {
-        if (!newScheduleItem.value.title) return;
-        const date = newScheduleItem.value.date;
-        if (!scheduleData.value[date]) scheduleData.value[date] = [];
-        if (editingScheduleId.value) {
-            if(!checkPassword()) return;
-            const idx = scheduleData.value[date].findIndex(i => i.id === editingScheduleId.value);
-            if (idx !== -1) scheduleData.value[date][idx] = { ...newScheduleItem.value };
-            editingScheduleId.value = null;
-        } else {
-            scheduleData.value[date].push({ ...newScheduleItem.value, id: Date.now() });
-        }
-        scheduleData.value[date].sort((a, b) => a.time.localeCompare(b.time));
-        newScheduleItem.value = { date: '29/3', time: '09:00', title: '', category: '', estPersonal: null, estShared: null, address: '', desc: '' };
-        showAddSchedule.value = false; saveToGitHubAuto(); 
-    };
-
-    const addShopItem = () => {
-        if (!newShopItem.value.name) return;
-        if (editingShopId.value) {
-            if(!checkPassword()) return;
-            const idx = shoppingList.value.findIndex(s => s.id === editingShopId.value);
-            if(idx !== -1) shoppingList.value[idx] = { ...newShopItem.value, id: editingShopId.value };
-            editingShopId.value = null;
-        } else { shoppingList.value.push({ ...newShopItem.value, id: Date.now(), done: false }); }
-        newShopItem.value = { name: '', store: '', category: '其他', image: null };
-        showAddShopItem.value = false; saveToGitHubAuto();
-    };
-
-    const addExpense = () => {
-        if (!newExpense.value.title || !newExpense.value.amount) return;
-        if (editingExpenseId.value) {
-            if(!checkPassword()) return;
-            const idx = expenseList.value.findIndex(e => e.id === editingExpenseId.value);
-            if(idx !== -1) expenseList.value[idx] = { ...newExpense.value, id: editingExpenseId.value };
-            editingExpenseId.value = null;
-        } else { expenseList.value.push({ ...newExpense.value, id: Date.now() }); }
-        newExpense.value = { type: 'expense', date: '29/3', person: '公數', method: '現金', title: '', amount: null };
-        showAddExpense.value = false; saveToGitHubAuto();
-    };
 
     onMounted(async () => { await fetchFromGitHub(); lucide.createIcons(); });
     watch(currentTab, () => { nextTick(lucide.createIcons); selectedDate.value = null; });
     watch(githubConfig, (v) => localStorage.setItem('github_config', JSON.stringify(v)), { deep: true });
     watch(exchangeRates, (v) => localStorage.setItem('exchange_rates', JSON.stringify(v)), { deep: true });
-    watch([showSettings, showAddSchedule, showAddShopItem, showAddExpense, showWeatherModal, showCalcModal, showImageModal, scheduleData, shoppingList, expenseList], () => nextTick(lucide.createIcons), { deep: true });
 
     return {
         currentTab, showSettings, showAddSchedule, showAddShopItem, showAddExpense, selectedDate, dateRange, shopCategories, shopFilter, githubConfig,
         newScheduleItem, editingScheduleId, newShopItem, editingShopId, newExpense, editingExpenseId, peopleConfigs,
         showWeatherModal, showCalcModal, showImageModal, selectedImageUrl, previewImage, loadingWeather, weatherData, calcExpression, calcJpy, exchangeRates, openWeather,
-        isSyncing,
-        calcAppend, calcClear, calcBackspace, calcResult,
+        isSyncing, calcAppend, calcClear, calcBackspace, calcResult,
         activeTabTitle: computed(() => tabs.find(t => t.id === currentTab.value)?.name),
-        // 地圖源邏輯
-        mapSrc: computed(() => mapMode.value === 'mymap' ? myMapUrl : `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery.value)}&output=embed`),
-        tabs, sortedShoppingList: computed(() => { let list = [...shoppingList.value]; if (shopFilter.value !== 'all') list = list.filter(i => i.category === shopFilter.value); return list.sort((a, b) => (a.done !== b.done) ? (a.done ? 1 : -1) : a.id - b.id); }),
+        
+        // --- 關鍵修改：地圖 URL 計算邏輯 ---
+        mapSrc: computed(() => {
+            if (mapMode.value === 'mymap') {
+                return myMapUrl;
+            }
+            return `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery.value)}&output=embed`;
+        }),
+
+        tabs: [{ id: 'schedule', name: '行程', icon: 'calendar' }, { id: 'map', name: '地圖', icon: 'map' }, { id: 'shopping', name: '清單', icon: 'shopping-bag' }, { id: 'expense', name: '支出', icon: 'banknote' }],
+        sortedShoppingList: computed(() => { 
+            let list = [...shoppingList.value]; 
+            if (shopFilter.value !== 'all') list = list.filter(i => i.category === shopFilter.value); 
+            return list.sort((a, b) => (a.done !== b.done) ? (a.done ? 1 : -1) : a.id - b.id); 
+        }),
         totalEstTransportPersonal: computed(() => Object.values(scheduleData.value).flat().filter(i => i.category === '交通').reduce((s, i) => s + (Number(i.estPersonal)||0) + ((Number(i.estShared)||0)/4), 0)),
         totalEstDiningPersonal: computed(() => Object.values(scheduleData.value).flat().filter(i => i.category === '飲食').reduce((s, i) => s + (Number(i.estPersonal)||0) + ((Number(i.estShared)||0)/4), 0)),
         totalEstAttractionsPersonal: computed(() => Object.values(scheduleData.value).flat().filter(i => i.category === '景點').reduce((s, i) => s + (Number(i.estPersonal)||0) + ((Number(i.estShared)||0)/4), 0)),
         totalEstAccommodationPersonal: computed(() => Object.values(scheduleData.value).flat().filter(i => i.category === '住宿').reduce((s, i) => s + (Number(i.estPersonal)||0) + ((Number(i.estShared)||0)/4), 0)),
+        
         toggleAddSchedule: () => { if(showAddSchedule.value) { editingScheduleId.value = null; showAddSchedule.value = false; } else { showAddSchedule.value = true; nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' })); } },
         toggleAddShop: () => { if(showAddShopItem.value) { editingShopId.value = null; showAddShopItem.value = false; } else { showAddShopItem.value = true; nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' })); } },
         toggleAddExpense: () => { if(showAddExpense.value) { editingExpenseId.value = null; showAddExpense.value = false; } else { showAddExpense.value = true; nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' })); } },
@@ -224,13 +178,23 @@ setup() {
         getPersonColor: (n) => ({ '公數': '#91A0A5', '妃': '#8E9775', '爸媽': '#A79A89', '而': '#B77F70' }[n] || '#999'),
         getPersonBg: (n) => ({ '公數': 'bg-[#E6EAEB]', '爸媽': 'bg-[#ECE9E4]', '妃': 'bg-[#E9EBE2]', '而': 'bg-[#EFE2DE]' }[n] || 'bg-gray-100'),
         getCatStyle: (c) => ({ '交通': 'bg-[#91A0A5]', '景點': 'bg-[#8E9775]', '飲食': 'bg-[#B77F70]', '購物': 'bg-[#A79A89]', '住宿': 'bg-[#607D8B]' }[c] || 'bg-gray-500'),
+        
         jumpToMap: (t) => { mapQuery.value = t; mapMode.value = 'normal'; currentTab.value = 'map'; },
         searchMap: (q) => { mapMode.value = 'normal'; mapQuery.value = q; },
-        openMyMap: () => mapMode.value = 'mymap', // 切換模式
-        addScheduleItem, editScheduleItem, cancelEditSchedule: () => { editingScheduleId.value = null; showAddSchedule.value = false; },
-        deleteScheduleItem, addShopItem, editShopItem, cancelEditShop: () => { editingShopId.value = null; showAddShopItem.value = false; },
-        deleteShopItem, addExpense, editExpense, cancelEditExpense: () => { editingExpenseId.value = null; showAddExpense.value = false; },
-        deleteExpense, fetchFromGitHub, syncToGitHub,
+        
+        // 核心切換功能
+        openMyMap: () => { 
+            console.log("切換至我的地圖");
+            mapMode.value = 'mymap'; 
+        },
+
+        addScheduleItem, deleteScheduleItem, editScheduleItem: (item, date) => { newScheduleItem.value = { ...item, date }; editingScheduleId.value = item.id; showAddSchedule.value = true; },
+        cancelEditSchedule: () => { editingScheduleId.value = null; showAddSchedule.value = false; },
+        addShopItem, deleteShopItem, editShopItem: (item) => { newShopItem.value = { ...item }; editingShopId.value = item.id; showAddShopItem.value = true; },
+        cancelEditShop: () => { editingShopId.value = null; showAddShopItem.value = false; },
+        addExpense, deleteExpense, editExpense: (i) => { newExpense.value = { ...i }; editingExpenseId.value = i.id; showAddExpense.value = true; },
+        cancelEditExpense: () => { editingExpenseId.value = null; showAddExpense.value = false; },
+        fetchFromGitHub, syncToGitHub,
         handleImageUpload: (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -239,10 +203,9 @@ setup() {
                 const img = new Image();
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    let width = img.width, height = img.height;
-                    const max_size = 800;
-                    if (width > height) { if (width > max_size) { height *= max_size / width; width = max_size; } }
-                    else { if (height > max_size) { width *= max_size / height; height = max_size; } }
+                    let width = img.width, height = img.height, max = 800;
+                    if (width > height) { if (width > max) { height *= max / width; width = max; } }
+                    else { if (height > max) { width *= max / height; height = max; } }
                     canvas.width = width; canvas.height = height;
                     canvas.getContext('2d').drawImage(img, 0, 0, width, height);
                     newShopItem.value.image = canvas.toDataURL('image/jpeg', 0.7);
