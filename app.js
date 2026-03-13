@@ -25,9 +25,9 @@ setup() {
     const initialLoadedCount = ref(0);
 
     const selectedDate = ref(null);
-    const mapQuery = 'https://www.google.com/maps/d/embed?mid=1BH1Wp-fTNOady5xFfHqKO5MSHP2hNOM&ehbc=2E312F&noprof=1';
+    const mapQuery = ref('東京');
     const mapMode = ref('normal');
-    const myMapUrl = 'https://www.google.com/maps/d/edit?mid=1BH1Wp-fTNOady5xFfHqKO5MSHP2hNOM&usp=sharing';
+    const myMapUrl = 'https://www.google.com/maps/d/embed?mid=1BH1Wp-fTNOady5xFfHqKO5MSHP2hNOM&ehbc=2E312F&noprof=1';
     const dateRange = ['29/3', '30/3', '31/3', '1/4', '2/4', '3/4', '4/4', '5/4', '6/4', '7/4'];
     const shopCategories = ['3COINS', 'LOFT', '藥妝', '百貨公司', '便利店', '超市', '其他'];
     const shopFilter = ref('all');
