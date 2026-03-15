@@ -48,11 +48,22 @@ setup() {
         { name: '妃', colorClass: 'bg-[#E9EBE2]' }, { name: '而', colorClass: 'bg-[#EFE2DE]' }
     ];
 
+    // --- 捲動邏輯 (已修改：僅行程頁會讓導覽列置中) ---
     const scrollToDate = (d) => { 
         selectedDate.value = d; 
         const id = d === 'summary' ? 'expense-summary' : (currentTab.value === 'expense' ? 'expense-date-' : 'date-') + d.replace('/', '-'); 
         const el = document.getElementById(id); 
         if(el) window.scrollTo({ top: el.offsetTop - 145, behavior: 'smooth' }); 
+
+        // 僅在「行程頁」時，讓上方日期導覽列自動捲動到中間
+        if (currentTab.value === 'schedule') {
+            nextTick(() => {
+                const navBtn = document.getElementById('nav-' + d.replace('/', '-'));
+                if (navBtn) {
+                    navBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                }
+            });
+        }
     };
 
     const getDateTheme = (date) => {
@@ -249,11 +260,22 @@ setup() {
 
     watch(currentTab, (newTab) => {
         nextTick(lucide.createIcons);
-        selectedDate.value = null;
-        if (newTab === 'shopping') shopFilter.value = 'all';
-        // 換到 map, shopping, expenses 時回到頂部
-        if (newTab !== 'schedule') {
-            nextTick(() => { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+        
+        if (newTab === 'schedule') {
+            // 切換回行程頁：再次觸發自動跳轉
+            const now = new Date();
+            const todayStr = `${now.getDate()}/${now.getMonth() + 1}`;
+            const targetDate = dateRange.includes(todayStr) ? todayStr : '29/3';
+            nextTick(() => {
+                scrollToDate(targetDate);
+            });
+        } else {
+            // 切換到其他頁：重置高亮並回到頂部
+            selectedDate.value = null;
+            if (newTab === 'shopping') shopFilter.value = 'all';
+            nextTick(() => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
         }
     });
 
