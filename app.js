@@ -27,6 +27,7 @@ setup() {
     const shopCategories = ['3COINS', 'LOFT', '藥妝', '百貨公司', '便利店', '超市', '其他'];
     const shopFilter = ref('all');
     
+    // 初始化時從 localStorage 讀取
     const githubConfig = ref(JSON.parse(localStorage.getItem('github_config')) || { owner: '', repo: '', token: '' });
     const exchangeRates = ref(JSON.parse(localStorage.getItem('exchange_rates')) || {
         baMa: 0.05511, fei: 0.0554338, yee: 0.051558
@@ -40,7 +41,9 @@ setup() {
     const editingScheduleId = ref(null);
     const newShopItem = ref({ name: '', store: '', category: '其他', image: null });
     const editingShopId = ref(null);
-    const newExpense = ref({ type: 'expense', date: 'targetDate', person: '公數', method: '現金', title: '', amount: null });
+    
+    // 新增支出預設值
+    const newExpense = ref({ type: 'expense', date: '29/3', person: '公數', method: '現金', title: '', amount: null });
     const editingExpenseId = ref(null);
 
     const peopleConfigs = [
@@ -48,6 +51,7 @@ setup() {
         { name: '妃', colorClass: 'bg-[#E9EBE2]' }, { name: '而', colorClass: 'bg-[#EFE2DE]' }
     ];
 
+    // --- 捲動邏輯函式 ---
     const scrollToDate = (d) => { 
         selectedDate.value = d; 
         const id = d === 'summary' ? 'expense-summary' : (currentTab.value === 'expense' ? 'expense-date-' : 'date-') + d.replace('/', '-'); 
@@ -55,6 +59,7 @@ setup() {
         if(el) window.scrollTo({ top: el.offsetTop - 145, behavior: 'smooth' }); 
     };
 
+    // --- 梅花間竹主題邏輯 ---
     const getDateTheme = (date) => {
         const idx = dateRange.indexOf(date);
         const cycle = idx % 3;
@@ -236,14 +241,25 @@ setup() {
     onMounted(async () => { 
         await fetchFromGitHub(); 
         lucide.createIcons(); 
+
+        // 取得當前日期 (日/月)
         const now = new Date();
         const todayStr = `${now.getDate()}/${now.getMonth() + 1}`;
+        
+        // 判定目標日期：如果在行程範圍內則跳到當天，否則跳到 29/3
         const targetDate = dateRange.includes(todayStr) ? todayStr : '29/3';
+
+        // --- 設定新增支出表單的預設日期 ---
+        newExpense.value.date = targetDate;
+
+        // 確保 DOM 渲染後執行行程頁跳轉
         nextTick(() => {
             setTimeout(() => {
-                // 初始化預設是在行程頁，故執行跳轉
-                scrollToDate(targetDate);
-            }, 600); // 給予足夠時間讓 GitHub 資料完全載入並顯示
+                // 僅在行程頁執行自動捲動
+                if (currentTab.value === 'schedule') {
+                    scrollToDate(targetDate);
+                }
+            }, 600); 
         });
     });
 
@@ -256,7 +272,6 @@ setup() {
     watch(exchangeRates, (newVal) => {
         localStorage.setItem('exchange_rates', JSON.stringify(newVal));
     }, { deep: true });
-    // -----------------------------------------------------------------------
 
     watch([showSettings, showAddSchedule, showAddShopItem, showAddExpense, showWeatherModal, showCalcModal, showImageModal, scheduleData, shoppingList, expenseList], () => nextTick(lucide.createIcons), { deep: true });
 
